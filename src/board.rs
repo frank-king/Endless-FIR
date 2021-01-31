@@ -5,6 +5,7 @@ use amethyst::ecs::*;
 use amethyst::renderer::sprite::SpriteSheetHandle;
 use amethyst::renderer::SpriteRender;
 use log::info;
+use std::collections::HashMap;
 
 use crate::cursor::Coord;
 use crate::{ARENA_HEIGHT, ARENA_WIDTH, GRID_OFFSET};
@@ -35,8 +36,9 @@ impl Piece {
 pub struct Board {
     half_width: i32,
     width: i32,
-    five_in_a_row: Option<[usize; 5]>,
+    five_in_a_row: Option<[Entity; 5]>,
     pieces: Vec<Option<Piece>>,
+    entity_map: HashMap<usize, Entity>,
 }
 
 impl Board {
@@ -47,6 +49,7 @@ impl Board {
             width,
             five_in_a_row: None,
             pieces: vec![None; (width * width) as usize],
+            entity_map: HashMap::new(),
         }
     }
     pub fn pos2idx(&self, pos: &Coord) -> usize {
@@ -67,10 +70,17 @@ impl Board {
         let idx = self.pos2idx(pos);
         if self.pieces[idx].is_none() {
             self.pieces[idx] = Some(piece);
-            self.five_in_a_row = self.five_in_a_row(pos);
             return true;
         }
         false
+    }
+    pub fn put_entity(&mut self, pos: &Coord, entity: Entity) {
+        let idx = self.pos2idx(pos);
+        self.entity_map.insert(idx, entity);
+        self.five_in_a_row = self.calc_five_in_a_row(pos);
+    }
+    pub fn take_five_in_a_row(&mut self) -> Option<[Entity; 5]> {
+        self.five_in_a_row.take()
     }
     pub fn logic2pos(&self, x: f32, y: f32) -> Coord {
         let x = (x - 0.5) * ARENA_WIDTH / GRID_OFFSET;
@@ -100,7 +110,7 @@ impl Board {
         count
     }
 
-    fn five_in_a_row(&self, pos: &Coord) -> Option<[usize; 5]> {
+    fn calc_five_in_a_row(&self, pos: &Coord) -> Option<[Entity; 5]> {
         for (dx, dy) in &[(1, 0), (0, 1), (1, 1), (1, -1)] {
             let count0 = self.count_ours(pos, -*dx, -*dy);
             let count1 = self.count_ours(pos, *dx, *dy);
@@ -114,7 +124,13 @@ impl Board {
                     pos.y += dy;
                 }
                 info!("find five in row: {:?}", line);
-                return Some(line);
+                return Some([
+                    self.entity_map[&line[0]],
+                    self.entity_map[&line[1]],
+                    self.entity_map[&line[2]],
+                    self.entity_map[&line[3]],
+                    self.entity_map[&line[4]],
+                ]);
             }
         }
         None
@@ -184,11 +200,14 @@ impl<'a> System<'a> for PieceSystem {
                 let mut renderer = (*renderer).clone();
                 Self::setup_renderer(&mut renderer, piece.piece.idx());
                 let transform = Self::setup_transform(&*default_trans, &piece.pos);
-                entities
-                    .build_entity()
-                    .with(renderer, &mut render_storage)
-                    .with(transform, &mut transform_storage)
-                    .build();
+                board.put_entity(
+                    &piece.pos,
+                    entities
+                        .build_entity()
+                        .with(renderer, &mut render_storage)
+                        .with(transform, &mut transform_storage)
+                        .build(),
+                );
             }
         }
     }

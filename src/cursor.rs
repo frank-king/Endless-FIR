@@ -6,6 +6,7 @@ use amethyst::renderer::resources::Tint;
 use amethyst::renderer::sprite::SpriteSheetHandle;
 use amethyst::renderer::{SpriteRender, Transparent};
 
+use crate::blink::ToggleHidden;
 use crate::board::{Piece, PieceRender};
 use crate::{ARENA_HEIGHT, ARENA_WIDTH};
 
@@ -32,8 +33,8 @@ pub struct Cursor {
 }
 
 impl Cursor {
-    pub fn show(&mut self) {
-        self.show = true;
+    pub fn set_show(&mut self, show: bool) {
+        self.show = show;
         self.dirty();
     }
     pub fn hide(&mut self) {
@@ -48,19 +49,7 @@ impl Cursor {
 pub struct CursorSystem;
 
 impl PieceRender for CursorSystem {}
-
-impl CursorSystem {
-    fn toggle_hidden(hidden: &mut WriteStorage<Hidden>, show: bool, entity: Entity) {
-        if show && hidden.get(entity).is_some() {
-            hidden.remove(entity);
-        }
-        if !show && hidden.get(entity).is_none() {
-            hidden
-                .insert(entity, Hidden)
-                .expect("failed to insert Hidden");
-        }
-    }
-}
+impl ToggleHidden for CursorSystem {}
 
 impl<'a> System<'a> for CursorSystem {
     type SystemData = (
