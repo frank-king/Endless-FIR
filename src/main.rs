@@ -1,7 +1,6 @@
-use amethyst::assets::{AssetStorage, Handle, Loader};
+use amethyst::assets::{AssetStorage, Loader};
 use amethyst::core::ecs::Entity;
 use amethyst::core::{Transform, TransformBundle};
-use amethyst::input::{is_close_requested, InputEvent};
 use amethyst::prelude::*;
 use amethyst::renderer::sprite::SpriteSheetHandle;
 use amethyst::renderer::types::DefaultBackend;
@@ -9,14 +8,13 @@ use amethyst::renderer::{
     Camera, ImageFormat, RenderFlat2D, RenderToWindow, RenderingBundle, SpriteSheet,
     SpriteSheetFormat, Texture,
 };
-use amethyst::window::ScreenDimensions;
 use amethyst::winit::{ElementState, Event, MouseButton, WindowEvent};
-use log::{debug, info, log_enabled, trace, Level};
 
 mod board;
 mod cursor;
 
-use board::{initialize_board, Board, ChessBoard, Piece};
+use crate::board::WantsToPlacePiece;
+use board::{initialize_board, Board, Piece};
 use cursor::{initialize_cursor, Coord, Cursor};
 
 pub const ARENA_HEIGHT: f32 = 800.0;
@@ -27,6 +25,7 @@ const BOARD_SPRITE_SHEET: &str = "texture/board.ron";
 const PIECE_TEXTURE: &str = "texture/piece.png";
 const PIECE_SPRITE_SHEET: &str = "texture/piece.ron";
 
+#[derive(Copy, Clone)]
 pub enum RunState {
     Player,
     Computer,
@@ -44,10 +43,6 @@ impl SimpleState for State {
         let world = data.world;
         let board_handle = load_sprite_sheet(world, BOARD_TEXTURE, BOARD_SPRITE_SHEET);
         let piece_handle = load_sprite_sheet(world, PIECE_TEXTURE, PIECE_SPRITE_SHEET);
-        world.register::<Piece>();
-        world.register::<Board>();
-        world.register::<Coord>();
-        world.register::<Cursor>();
         initialize_board(world, board_handle);
         initialize_cursor(world, piece_handle);
         initialize_camara(world);
@@ -66,40 +61,59 @@ impl SimpleState for State {
         if let StateEvent::Window(e) = event {
             if let Event::WindowEvent { event, .. } = e {
                 let world = data.world;
-                let cursor_entity = world.fetch::<Entity>();
-                let board = world.fetch::<ChessBoard>();
-                let mut window_size = world.fetch_mut::<LogicalSize>();
-                let mut pos = world.write_storage::<Coord>();
-                let mut cursor = world.write_storage::<Cursor>();
+                let cursor_entity = *world.fetch::<Entity>();
 
                 // info!("window event {:?}", event);
                 match event {
                     WindowEvent::Resized(size) => {
+                        let mut window_size = world.fetch_mut::<LogicalSize>();
                         window_size.width = size.width;
                         window_size.height = size.height;
                     }
                     WindowEvent::CloseRequested => return Trans::Quit,
                     WindowEvent::CursorMoved { position, .. } => {
+                        let window_size = world.fetch::<LogicalSize>();
+                        let board = world.fetch::<Board>();
+                        let mut pos = world.write_storage::<Coord>();
+                        let mut cursor = world.write_storage::<Cursor>();
+
                         let x = position.x / window_size.width;
                         let y = 1.0 - position.y / window_size.height;
-                        let coord = board.logic2pnt(x as f32, y as f32);
-                        let old_coord = pos.get_mut(*cursor_entity).unwrap();
+                        let coord = board.logic2pos(x as f32, y as f32);
+                        let old_coord = pos.get_mut(cursor_entity).unwrap();
                         if coord != *old_coord {
-                            cursor.get_mut(*cursor_entity).unwrap().dirty();
+                            cursor.get_mut(cursor_entity).unwrap().dirty();
                         }
                         *old_coord = coord;
                     }
                     WindowEvent::CursorEntered { .. } => {
-                        cursor.get_mut(*cursor_entity).unwrap().show()
+                        let mut cursor = world.write_storage::<Cursor>();
+                        cursor.get_mut(cursor_entity).unwrap().show()
                     }
                     WindowEvent::CursorLeft { .. } => {
-                        cursor.get_mut(*cursor_entity).unwrap().hide();
+                        let mut cursor = world.write_storage::<Cursor>();
+                        cursor.get_mut(cursor_entity).unwrap().hide();
                     }
                     WindowEvent::MouseInput { state, button, .. } => {
-                        if !pos.get(*cursor_entity).unwrap().out_of_bound
+                        let pos = *world.read_storage::<Coord>().get(cursor_entity).unwrap();
+
+                        if !pos.out_of_bound
                             && matches!(state, ElementState::Released)
                             && matches!(button, MouseButton::Left)
-                        {}
+                        {
+                            let piece = {
+                                let mut state = world.fetch_mut::<RunState>();
+                                let (new_state, piece) = match *state {
+                                    RunState::Player => (RunState::Computer, Piece::Black),
+                                    RunState::Computer => (RunState::Player, Piece::White),
+                                };
+                                *state = new_state;
+                                piece
+                            };
+                            world.insert(WantsToPlacePiece { piece, pos });
+                            let mut cursor_piece = world.write_storage::<Piece>();
+                            *cursor_piece.get_mut(cursor_entity).unwrap() = piece.next();
+                        }
                     }
                     _ => {}
                 }
@@ -153,7 +167,8 @@ fn main() -> amethyst::Result<()> {
                 .with_plugin(RenderFlat2D::default()),
         )?
         .with_bundle(TransformBundle::new())?
-        .with(cursor::CursorSystem, "cursor system", &[]);
+        .with(cursor::CursorSystem, "cursor system", &[])
+        .with(board::PieceSystem, "piece system", &[]);
 
     let assets_dir = app_root.join("assets");
     let mut game = Application::new(assets_dir, State, game_data)?;

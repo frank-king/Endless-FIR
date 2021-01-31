@@ -1,17 +1,15 @@
-use amethyst::core::math::{Vector2, Vector3};
+use amethyst::core::math::Vector3;
 use amethyst::core::{Hidden, Transform};
 use amethyst::ecs::*;
-use amethyst::input;
 use amethyst::renderer::palette::Srgba;
 use amethyst::renderer::resources::Tint;
 use amethyst::renderer::sprite::SpriteSheetHandle;
 use amethyst::renderer::{SpriteRender, Transparent};
-use log::{debug, info, log_enabled, trace, Level};
 
-use crate::board::{Board, Piece};
-use crate::{ARENA_HEIGHT, ARENA_WIDTH, GRID_OFFSET};
+use crate::board::{Piece, PieceRender};
+use crate::{ARENA_HEIGHT, ARENA_WIDTH};
 
-#[derive(Component, PartialEq)]
+#[derive(Component, PartialEq, Copy, Clone)]
 pub struct Coord {
     pub x: i32,
     pub y: i32,
@@ -49,37 +47,18 @@ impl Cursor {
 
 pub struct CursorSystem;
 
+impl PieceRender for CursorSystem {}
+
 impl CursorSystem {
     fn toggle_hidden(hidden: &mut WriteStorage<Hidden>, show: bool, entity: Entity) {
-        info!("cursor.show: {}", show);
         if show && hidden.get(entity).is_some() {
             hidden.remove(entity);
-            info!("hidden removed.");
         }
         if !show && hidden.get(entity).is_none() {
-            hidden.insert(entity, Hidden);
-            info!("hidden inserted.");
+            hidden
+                .insert(entity, Hidden)
+                .expect("failed to insert Hidden");
         }
-    }
-    fn set_piece(renderer: &mut SpriteRender, piece_idx: usize) {
-        if piece_idx != renderer.sprite_number {
-            renderer.sprite_number = piece_idx;
-        }
-    }
-    fn set_transform(
-        transform: &mut Transform,
-        default_trans: &ReadExpect<Transform>,
-        pos: &Coord,
-    ) {
-        info!(
-            "pos = ({}, {}), out_of_bound: {}",
-            pos.x, pos.y, pos.out_of_bound
-        );
-        let x = pos.x as f32 * GRID_OFFSET;
-        let y = pos.y as f32 * GRID_OFFSET;
-        let mut new_trans = (*default_trans).clone();
-        new_trans.append_translation_xyz(x, y, 0.0);
-        *transform = new_trans;
     }
 }
 
@@ -109,11 +88,10 @@ impl<'a> System<'a> for CursorSystem {
             .join();
         for (entity, pos, piece, cursor, renderer, transform) in joined {
             if cursor.dirty {
-                info!("cursor system run");
                 cursor.dirty = false;
                 Self::toggle_hidden(&mut hidden, cursor.show, entity);
-                Self::set_piece(renderer, piece.idx());
-                Self::set_transform(transform, &default_trans, pos);
+                Self::setup_renderer(renderer, piece.idx());
+                *transform = Self::setup_transform(&*default_trans, pos);
             }
         }
     }
@@ -126,6 +104,8 @@ pub fn initialize_cursor(world: &mut World, sprite_sheet_handle: SpriteSheetHand
     world.insert(transform.clone());
 
     let sprite_render = SpriteRender::new(sprite_sheet_handle, 0);
+    world.insert(sprite_render.clone());
+
     let cursor_entity = world
         .create_entity()
         .with(Piece::Black)
@@ -135,7 +115,7 @@ pub fn initialize_cursor(world: &mut World, sprite_sheet_handle: SpriteSheetHand
         .with(transform)
         .with(Hidden)
         .with(Transparent)
-        .with(Tint(Srgba::from_components((1.0, 1.0, 1.0, 0.8))))
+        .with(Tint(Srgba::from_components((0.8, 0.8, 0.8, 0.5))))
         .build();
     world.insert(cursor_entity);
 }
