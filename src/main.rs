@@ -1,7 +1,6 @@
 use amethyst::assets::{AssetStorage, Loader};
-use amethyst::core::{Transform, TransformBundle};
+use amethyst::core::{Hidden, Transform, TransformBundle};
 use amethyst::ecs::*;
-use amethyst::prelude::*;
 use amethyst::renderer::sprite::SpriteSheetHandle;
 use amethyst::renderer::types::DefaultBackend;
 use amethyst::renderer::{
@@ -9,15 +8,18 @@ use amethyst::renderer::{
     SpriteSheetFormat, Texture,
 };
 use amethyst::winit::{ElementState, Event, MouseButton, WindowEvent};
+use amethyst::{
+    Application, GameData, GameDataBuilder, SimpleState, SimpleTrans, StateData, StateEvent, Trans,
+};
+use std::time::Duration;
 
 mod blink;
 mod board;
 mod cursor;
 
-use blink::PiecesBlinkState;
+use blink::{PiecesBlinkState, ToggleHidden};
 use board::{initialize_board, Board, Piece, WantsToPlacePiece};
 use cursor::{initialize_cursor, Coord, Cursor};
-use std::time::Duration;
 
 pub const ARENA_HEIGHT: f32 = 800.0;
 pub const ARENA_WIDTH: f32 = 800.0;
@@ -28,9 +30,26 @@ const PIECE_TEXTURE: &str = "texture/piece.png";
 const PIECE_SPRITE_SHEET: &str = "texture/piece.ron";
 
 #[derive(Copy, Clone)]
-pub enum RunState {
+pub enum Turn {
     Player,
     Computer,
+}
+
+pub struct BonusTurn(pub bool);
+
+impl Turn {
+    pub fn piece(&self) -> Piece {
+        match self {
+            Turn::Player => Piece::Black,
+            Turn::Computer => Piece::White,
+        }
+    }
+    pub fn next(&self) -> Self {
+        match self {
+            Turn::Player => Turn::Computer,
+            Turn::Computer => Turn::Player,
+        }
+    }
 }
 
 struct LogicalSize {
@@ -40,6 +59,80 @@ struct LogicalSize {
 
 struct State;
 
+impl ToggleHidden for State {}
+
+impl State {
+    pub fn new() -> Self {
+        Self
+    }
+    fn cursor_moved_bonus_turn(&self, world: &World, old_coord: &Coord, coord: &Coord) {
+        let board = world.fetch::<Board>();
+        let mut hiddens = world.write_storage::<Hidden>();
+        if let Some(entity) = board.get_entity(old_coord) {
+            Self::toggle_hidden(&mut hiddens, true, entity);
+        }
+        let piece = world.fetch_mut::<Turn>().piece();
+        if board.get_piece(coord) != Some(piece) {
+            if let Some(entity) = board.get_entity(coord) {
+                Self::toggle_hidden(&mut hiddens, false, entity);
+            }
+        }
+    }
+    fn cursor_moved(&self, world: &mut World, x: f64, y: f64) {
+        let cursor_entity = *world.fetch::<Entity>();
+        let window_size = world.fetch::<LogicalSize>();
+        let board = world.fetch::<Board>();
+        let mut pos = world.write_storage::<Coord>();
+        let mut cursor = world.write_storage::<Cursor>();
+
+        let x = x / window_size.width;
+        let y = 1.0 - y / window_size.height;
+        let coord = board.logic2pos(x as f32, y as f32);
+        let old_coord = pos.get_mut(cursor_entity).unwrap();
+        if coord != *old_coord {
+            let cursor = cursor.get_mut(cursor_entity).unwrap();
+            cursor.set_show(!coord.out_of_bound);
+            if world.fetch::<BonusTurn>().0 {
+                self.cursor_moved_bonus_turn(world, old_coord, &coord);
+            }
+        }
+        *old_coord = coord;
+    }
+
+    fn mouse_clicked_bonus_turn(&self, world: &mut World, pos: &Coord) {
+        let entity_to_remove = {
+            let mut board = world.fetch_mut::<Board>();
+            let piece = world.fetch_mut::<Turn>().piece();
+            if board.get_piece(pos) != Some(piece) && board.take_piece(pos).is_some() {
+                board.remove_entity(pos)
+            } else {
+                None
+            }
+        };
+        if let Some(entity) = entity_to_remove {
+            world
+                .delete_entity(entity)
+                .expect("unable to delete entity");
+            world.fetch_mut::<BonusTurn>().0 = false;
+        }
+    }
+    fn mouse_clicked(&self, world: &mut World, pos: Coord) {
+        if world.fetch::<BonusTurn>().0 {
+            self.mouse_clicked_bonus_turn(world, &pos);
+        }
+        if world.fetch::<Board>().get_piece(&pos).is_some() {
+            return;
+        }
+        let piece = {
+            let mut turn = world.fetch_mut::<Turn>();
+            let piece = turn.piece();
+            *turn = turn.next();
+            piece
+        };
+        world.insert(WantsToPlacePiece { piece, pos });
+    }
+}
+
 impl SimpleState for State {
     fn on_start(&mut self, data: StateData<'_, GameData<'_, '_>>) {
         let world = data.world;
@@ -48,7 +141,8 @@ impl SimpleState for State {
         initialize_board(world, board_handle);
         initialize_cursor(world, piece_handle);
         initialize_camara(world);
-        world.insert(RunState::Player);
+        world.insert(Turn::Player);
+        world.insert(BonusTurn(false));
         world.insert(LogicalSize {
             width: ARENA_WIDTH as f64,
             height: ARENA_HEIGHT as f64,
@@ -93,20 +187,7 @@ impl SimpleState for State {
                     }
                     WindowEvent::CloseRequested => return Trans::Quit,
                     WindowEvent::CursorMoved { position, .. } => {
-                        let window_size = world.fetch::<LogicalSize>();
-                        let board = world.fetch::<Board>();
-                        let mut pos = world.write_storage::<Coord>();
-                        let mut cursor = world.write_storage::<Cursor>();
-
-                        let x = position.x / window_size.width;
-                        let y = 1.0 - position.y / window_size.height;
-                        let coord = board.logic2pos(x as f32, y as f32);
-                        let old_coord = pos.get_mut(cursor_entity).unwrap();
-                        if coord != *old_coord {
-                            let mut cursor = cursor.get_mut(cursor_entity).unwrap();
-                            cursor.set_show(!coord.out_of_bound);
-                        }
-                        *old_coord = coord;
+                        self.cursor_moved(world, position.x, position.y);
                     }
                     WindowEvent::CursorLeft { .. } => {
                         let mut cursor = world.write_storage::<Cursor>();
@@ -119,18 +200,7 @@ impl SimpleState for State {
                             && matches!(state, ElementState::Released)
                             && matches!(button, MouseButton::Left)
                         {
-                            let piece = {
-                                let mut state = world.fetch_mut::<RunState>();
-                                let (new_state, piece) = match *state {
-                                    RunState::Player => (RunState::Computer, Piece::Black),
-                                    RunState::Computer => (RunState::Player, Piece::White),
-                                };
-                                *state = new_state;
-                                piece
-                            };
-                            world.insert(WantsToPlacePiece { piece, pos });
-                            let mut cursor_piece = world.write_storage::<Piece>();
-                            *cursor_piece.get_mut(cursor_entity).unwrap() = piece.next();
+                            self.mouse_clicked(world, pos);
                         }
                     }
                     _ => {}
@@ -190,7 +260,7 @@ fn main() -> amethyst::Result<()> {
         .with(blink::BlinkSystem, "blink system", &[]);
 
     let assets_dir = app_root.join("assets");
-    let mut game = Application::new(assets_dir, State, game_data)?;
+    let mut game = Application::new(assets_dir, State::new(), game_data)?;
     game.run();
 
     Ok(())

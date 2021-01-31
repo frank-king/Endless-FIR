@@ -66,6 +66,10 @@ impl Board {
     pub fn get_piece(&self, pos: &Coord) -> Option<Piece> {
         self.pieces[self.pos2idx(pos)]
     }
+    pub fn take_piece(&mut self, pos: &Coord) -> Option<Piece> {
+        let idx = self.pos2idx(pos);
+        self.pieces[idx].take()
+    }
     pub fn set_piece(&mut self, pos: &Coord, piece: Piece) -> bool {
         let idx = self.pos2idx(pos);
         if self.pieces[idx].is_none() {
@@ -78,6 +82,13 @@ impl Board {
         let idx = self.pos2idx(pos);
         self.entity_map.insert(idx, entity);
         self.five_in_a_row = self.calc_five_in_a_row(pos);
+    }
+    pub fn get_entity(&self, pos: &Coord) -> Option<Entity> {
+        self.entity_map.get(&self.pos2idx(pos)).cloned()
+    }
+    pub fn remove_entity(&mut self, pos: &Coord) -> Option<Entity> {
+        let idx = self.pos2idx(pos);
+        self.entity_map.remove(&idx)
     }
     pub fn take_five_in_a_row(&mut self) -> Option<[Entity; 5]> {
         self.five_in_a_row.take()
@@ -181,6 +192,7 @@ impl<'a> System<'a> for PieceSystem {
         ReadExpect<'a, Transform>,
         WriteExpect<'a, Board>,
         Option<WriteExpect<'a, WantsToPlacePiece>>,
+        WriteStorage<'a, Piece>,
         WriteStorage<'a, SpriteRender>,
         WriteStorage<'a, Transform>,
     );
@@ -192,6 +204,7 @@ impl<'a> System<'a> for PieceSystem {
             default_trans,
             mut board,
             mut piece,
+            mut piece_storage,
             mut render_storage,
             mut transform_storage,
         ) = data;
@@ -204,6 +217,7 @@ impl<'a> System<'a> for PieceSystem {
                     &piece.pos,
                     entities
                         .build_entity()
+                        .with(piece.piece, &mut piece_storage)
                         .with(renderer, &mut render_storage)
                         .with(transform, &mut transform_storage)
                         .build(),

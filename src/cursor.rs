@@ -7,8 +7,8 @@ use amethyst::renderer::sprite::SpriteSheetHandle;
 use amethyst::renderer::{SpriteRender, Transparent};
 
 use crate::blink::ToggleHidden;
-use crate::board::{Piece, PieceRender};
-use crate::{ARENA_HEIGHT, ARENA_WIDTH};
+use crate::board::PieceRender;
+use crate::{Turn, ARENA_HEIGHT, ARENA_WIDTH};
 
 #[derive(Component, PartialEq, Copy, Clone)]
 pub struct Coord {
@@ -55,8 +55,8 @@ impl<'a> System<'a> for CursorSystem {
     type SystemData = (
         Entities<'a>,
         ReadExpect<'a, Transform>,
+        ReadExpect<'a, Turn>,
         ReadStorage<'a, Coord>,
-        ReadStorage<'a, Piece>,
         WriteStorage<'a, Cursor>,
         WriteStorage<'a, SpriteRender>,
         WriteStorage<'a, Transform>,
@@ -64,22 +64,14 @@ impl<'a> System<'a> for CursorSystem {
     );
 
     fn run(&mut self, data: Self::SystemData) {
-        let (entities, default_trans, pos, piece, mut cursor, mut renderer, mut trans, mut hidden) =
+        let (entities, default_trans, turn, pos, mut cursor, mut renderer, mut trans, mut hidden) =
             data;
-        let joined = (
-            &entities,
-            &pos,
-            &piece,
-            &mut cursor,
-            &mut renderer,
-            &mut trans,
-        )
-            .join();
-        for (entity, pos, piece, cursor, renderer, transform) in joined {
+        let joined = (&entities, &pos, &mut cursor, &mut renderer, &mut trans).join();
+        for (entity, pos, cursor, renderer, transform) in joined {
             if cursor.dirty {
                 cursor.dirty = false;
                 Self::toggle_hidden(&mut hidden, cursor.show, entity);
-                Self::setup_renderer(renderer, piece.idx());
+                Self::setup_renderer(renderer, turn.piece().idx());
                 *transform = Self::setup_transform(&*default_trans, pos);
             }
         }
@@ -97,7 +89,6 @@ pub fn initialize_cursor(world: &mut World, sprite_sheet_handle: SpriteSheetHand
 
     let cursor_entity = world
         .create_entity()
-        .with(Piece::Black)
         .with(Coord::new_bounded(0, 0))
         .with(Cursor::default())
         .with(sprite_render)

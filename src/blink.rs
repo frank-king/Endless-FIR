@@ -3,6 +3,9 @@ use amethyst::ecs::*;
 use amethyst::{GameData, SimpleState, SimpleTrans, StateData, Trans};
 use std::time::Duration;
 
+use crate::board::Piece;
+use crate::{BonusTurn, Turn};
+
 pub struct PiecesBlinkState {
     pub fir: [Entity; 5],
     pub duration: Duration,
@@ -25,6 +28,12 @@ impl SimpleState for PiecesBlinkState {
 
     fn on_stop(&mut self, data: StateData<'_, GameData<'_, '_>>) {
         let world = data.world;
+        world.fetch_mut::<BonusTurn>().0 = true;
+        let piece = *world.read_storage::<Piece>().get(self.fir[0]).unwrap();
+        let mut turn = world.fetch_mut::<Turn>();
+        if turn.piece() != piece {
+            *turn = turn.next();
+        }
         let entities = world.entities_mut();
         self.fir
             .iter()
