@@ -4,6 +4,7 @@ use amethyst::core::Transform;
 use amethyst::ecs::*;
 use amethyst::renderer::sprite::SpriteSheetHandle;
 use amethyst::renderer::SpriteRender;
+use log::info;
 
 use crate::cursor::Coord;
 use crate::{ARENA_HEIGHT, ARENA_WIDTH, GRID_OFFSET};
@@ -34,6 +35,7 @@ impl Piece {
 pub struct Board {
     half_width: i32,
     width: i32,
+    five_in_a_row: Option<[usize; 5]>,
     pieces: Vec<Option<Piece>>,
 }
 
@@ -43,6 +45,7 @@ impl Board {
         Self {
             half_width,
             width,
+            five_in_a_row: None,
             pieces: vec![None; (width * width) as usize],
         }
     }
@@ -64,6 +67,7 @@ impl Board {
         let idx = self.pos2idx(pos);
         if self.pieces[idx].is_none() {
             self.pieces[idx] = Some(piece);
+            self.five_in_a_row = self.five_in_a_row(pos);
             return true;
         }
         false
@@ -77,6 +81,43 @@ impl Board {
         let x = x.max(-self.half_width).min(self.half_width);
         let y = y.max(-self.half_width).min(self.half_width);
         Coord::new(x, y, out_of_bound)
+    }
+
+    fn count_ours(&self, pos: &Coord, dx: i32, dy: i32) -> i32 {
+        let mut count = 0;
+        if let Some(piece) = self.get_piece(pos) {
+            let Coord { mut x, mut y, .. } = *pos;
+            loop {
+                x += dx;
+                y += dy;
+                let pos = Coord::new_bounded(x, y);
+                if self.out_of_bound(x, y) || self.get_piece(&pos) != Some(piece) {
+                    break;
+                }
+                count += 1;
+            }
+        }
+        count
+    }
+
+    fn five_in_a_row(&self, pos: &Coord) -> Option<[usize; 5]> {
+        for (dx, dy) in &[(1, 0), (0, 1), (1, 1), (1, -1)] {
+            let count0 = self.count_ours(pos, -*dx, -*dy);
+            let count1 = self.count_ours(pos, *dx, *dy);
+            if count0 + count1 + 1 >= 5 {
+                let start = Coord::new_bounded(pos.x - dx * count0, pos.y - dy * count0);
+                let mut line = [0; 5];
+                let mut pos = start;
+                for idx in 0..5 {
+                    line[idx] = self.pos2idx(&pos);
+                    pos.x += dx;
+                    pos.y += dy;
+                }
+                info!("find five in row: {:?}", line);
+                return Some(line);
+            }
+        }
+        None
     }
 }
 
