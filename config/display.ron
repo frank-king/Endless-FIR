@@ -1,0 +1,6 @@
+(
+    title: "Five in a Row",
+    dimensions: Some((400, 400)),
+    min_dimensions: Some((400, 400)),
+    multisampling: 4,
+)
