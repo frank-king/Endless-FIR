@@ -1,18 +1,26 @@
 use amethyst::core::{Hidden, Time};
 use amethyst::ecs::*;
 use amethyst::{GameData, SimpleState, SimpleTrans, StateData, Trans};
+use log::info;
 use std::time::Duration;
 
-use crate::board::Piece;
 use crate::{BonusTurn, Turn};
 
 pub struct PiecesBlinkState {
     pub fir: [Entity; 5],
-    pub duration: Duration,
+    pub time: Duration,
+    pub turn: Turn,
+}
+
+impl PiecesBlinkState {
+    pub fn new(fir: [Entity; 5], time: Duration, turn: Turn) -> Self {
+        Self { fir, time, turn }
+    }
 }
 
 impl SimpleState for PiecesBlinkState {
     fn on_start(&mut self, data: StateData<'_, GameData<'_, '_>>) {
+        info!("in PiecesBlinkState ");
         let world = data.world;
         let mut blink_storage = world.write_storage::<Blink>();
         for entity in self.fir.iter() {
@@ -29,24 +37,21 @@ impl SimpleState for PiecesBlinkState {
     fn on_stop(&mut self, data: StateData<'_, GameData<'_, '_>>) {
         let world = data.world;
         world.fetch_mut::<BonusTurn>().0 = true;
-        let piece = *world.read_storage::<Piece>().get(self.fir[0]).unwrap();
-        let mut turn = world.fetch_mut::<Turn>();
-        if turn.piece() != piece {
-            *turn = turn.next();
-        }
+        *world.fetch_mut::<Turn>() = self.turn;
         let entities = world.entities_mut();
         self.fir
             .iter()
+            .inspect(|entity| info!("entity {:?} removed", entity))
             .for_each(|entity| entities.delete(*entity).expect("unable to delete entity"));
     }
 
     fn fixed_update(&mut self, data: StateData<'_, GameData<'_, '_>>) -> SimpleTrans {
         let world = data.world;
         let delta = world.fetch::<Time>().delta_time();
-        if self.duration < delta {
+        if self.time < delta {
             return Trans::Pop;
         } else {
-            self.duration -= delta;
+            self.time -= delta;
         }
         Trans::None
     }

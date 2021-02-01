@@ -5,6 +5,7 @@ use amethyst::renderer::palette::Srgba;
 use amethyst::renderer::resources::Tint;
 use amethyst::renderer::sprite::SpriteSheetHandle;
 use amethyst::renderer::{SpriteRender, Transparent};
+use std::fmt::{Display, Formatter};
 
 use crate::blink::ToggleHidden;
 use crate::board::PieceRender;
@@ -23,6 +24,12 @@ impl Coord {
     }
     pub fn new_bounded(x: i32, y: i32) -> Self {
         Self::new(x, y, false)
+    }
+}
+
+impl Display for Coord {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.x, self.y)
     }
 }
 

@@ -11,6 +11,7 @@ use amethyst::winit::{ElementState, Event, MouseButton, WindowEvent};
 use amethyst::{
     Application, GameData, GameDataBuilder, SimpleState, SimpleTrans, StateData, StateEvent, Trans,
 };
+use log::info;
 use std::time::Duration;
 
 mod blink;
@@ -72,7 +73,7 @@ impl State {
             Self::toggle_hidden(&mut hiddens, true, entity);
         }
         let piece = world.fetch_mut::<Turn>().piece();
-        if board.get_piece(coord) != Some(piece) {
+        if board.get_piece(coord) != Some(&piece) {
             if let Some(entity) = board.get_entity(coord) {
                 Self::toggle_hidden(&mut hiddens, false, entity);
             }
@@ -103,33 +104,39 @@ impl State {
         let entity_to_remove = {
             let mut board = world.fetch_mut::<Board>();
             let piece = world.fetch_mut::<Turn>().piece();
-            if board.get_piece(pos) != Some(piece) && board.take_piece(pos).is_some() {
-                board.remove_entity(pos)
-            } else {
-                None
+            let mut entity = None;
+            if board.get_piece(pos) != Some(&piece) && board.remove_piece(pos).is_some() {
+                entity = board.remove_entity(pos);
             }
+            entity
         };
         if let Some(entity) = entity_to_remove {
             world
                 .delete_entity(entity)
                 .expect("unable to delete entity");
-            world.fetch_mut::<BonusTurn>().0 = false;
         }
     }
     fn mouse_clicked(&self, world: &mut World, pos: Coord) {
+        info!("bonus turn: {}", world.fetch::<BonusTurn>().0);
         if world.fetch::<BonusTurn>().0 {
             self.mouse_clicked_bonus_turn(world, &pos);
         }
         if world.fetch::<Board>().get_piece(&pos).is_some() {
             return;
         }
+        world.fetch_mut::<BonusTurn>().0 = false;
         let piece = {
             let mut turn = world.fetch_mut::<Turn>();
             let piece = turn.piece();
             *turn = turn.next();
             piece
         };
-        world.insert(WantsToPlacePiece { piece, pos });
+        info!("wants to place {:?} piece at {}", piece, pos);
+        let cursor_entity = *world.fetch::<Entity>();
+        let mut piece_storage = world.write_storage::<WantsToPlacePiece>();
+        piece_storage
+            .insert(cursor_entity, WantsToPlacePiece { piece, pos })
+            .expect("unable to insert component");
     }
 }
 
@@ -150,11 +157,10 @@ impl SimpleState for State {
     }
 
     fn fixed_update(&mut self, data: StateData<'_, GameData<'_, '_>>) -> SimpleTrans {
-        let world = data.world;
-        let mut board = world.fetch_mut::<Board>();
-        if let Some(fir) = board.take_five_in_a_row() {
-            let duration = Duration::from_secs(2);
-            return Trans::Push(Box::new(PiecesBlinkState { fir, duration }));
+        let mut board = data.world.fetch_mut::<Board>();
+        if let Some((fir, turn)) = board.take_five_in_a_row() {
+            let time = Duration::from_secs(2);
+            return Trans::Push(Box::new(PiecesBlinkState::new(fir, time, turn)));
         }
         Trans::None
     }
